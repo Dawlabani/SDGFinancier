@@ -5,7 +5,7 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 require('dotenv').config();
 
-// Import route handlers (updated paths)
+// Import route handlers
 const chatbotRoutes = require('./routes/chatbot');
 const authRoutes = require('./routes/auth');
 const budgetRoutes = require('./routes/budget');
