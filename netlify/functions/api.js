@@ -5,15 +5,15 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 require('dotenv').config();
 
-// Import route handlers
-const chatbotRoutes = require('../../api/chatbot');
-const authRoutes = require('../../api/auth');
-const budgetRoutes = require('../../api/budget');
-const expenseRoutes = require('../../api/expenseModel');
-const profileRoutes = require('../../api/profile');
-const questionsRoutes = require('../../api/questions');
-const rewardsRoutes = require('../../api/rewards');
-const sustainabilityRoutes = require('../../api/sustainability');
+// Import route handlers (updated paths)
+const chatbotRoutes = require('./routes/chatbot');
+const authRoutes = require('./routes/auth');
+const budgetRoutes = require('./routes/budget');
+const expenseRoutes = require('./routes/expenseModel');
+const profileRoutes = require('./routes/profile');
+const questionsRoutes = require('./routes/questions');
+const rewardsRoutes = require('./routes/rewards');
+const sustainabilityRoutes = require('./routes/sustainability');
 
 const app = express();
 
@@ -21,12 +21,10 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Connect to MongoDB (adjust your .env accordingly)
-mongoose.connect(process.env.DB_URI).then(() => {
-  console.log('MongoDB connected');
-}).catch(err => {
-  console.error('MongoDB connection error:', err);
-});
+// Connect to MongoDB (ensure your DB_URI is correct in Netlify env variables)
+mongoose.connect(process.env.DB_URI)
+  .then(() => console.log('MongoDB connected'))
+  .catch(err => console.error('MongoDB connection error:', err));
 
 // Register API routes
 app.use('/api/chatbot', chatbotRoutes);
