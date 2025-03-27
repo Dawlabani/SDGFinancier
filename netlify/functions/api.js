@@ -2,7 +2,7 @@
 const express = require('express');
 const serverless = require('@netlify/functions');
 const cors = require('cors');
-const mongoose = require('mongoose');
+const { Sequelize } = require('sequelize');
 require('dotenv').config();
 
 // Import route handlers
@@ -21,10 +21,21 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Connect to MongoDB (ensure your DB_URI is correct in Netlify env variables)
-mongoose.connect(process.env.DB_URI)
-  .then(() => console.log('MongoDB connected'))
-  .catch(err => console.error('MongoDB connection error:', err));
+// Connect explicitly to your Neon PostgreSQL database
+const sequelize = new Sequelize("postgresql://neondb_owner:npg_Jn3SVYWM4vbL@ep-winter-morning-a8z5gk4d-pooler.eastus2.azure.neon.tech/neondb?sslmode=require", {
+  dialect: 'postgres',
+  protocol: 'postgres',
+  dialectOptions: {
+    ssl: {
+      require: true,
+      rejectUnauthorized: false
+    }
+  }
+});
+
+sequelize.authenticate()
+  .then(() => console.log('PostgreSQL connected successfully'))
+  .catch(err => console.error('Unable to connect to PostgreSQL:', err));
 
 // Register API routes
 app.use('/api/chatbot', chatbotRoutes);
