@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const baseURL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
+const baseURL = process.env.REACT_APP_API_URL || 'https://loquacious-halva-744131.netlify.app/api';
 
 const api = axios.create({
   baseURL,
