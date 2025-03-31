@@ -1,3 +1,4 @@
+// src/models/SustainabilityQuestion.js
 const { DataTypes } = require('sequelize');
 
 module.exports = (sequelize) => {
@@ -7,7 +8,6 @@ module.exports = (sequelize) => {
       defaultValue: DataTypes.UUIDV4,
       primaryKey: true,
     },
-    // Link the question to a category.
     category_id: {
       type: DataTypes.UUID,
       allowNull: false,
@@ -17,18 +17,28 @@ module.exports = (sequelize) => {
       type: DataTypes.TEXT,
       allowNull: false,
       comment: 'The text of the survey question',
+      get() {
+        return this.getDataValue('question_text');
+      }
     },
-    // A JSON object mapping answer options to multipliers.
-    // For example: { "Yes": 0.8, "No": 1.0 }
     possible_answers: {
-      type: DataTypes.JSON,
+      type: DataTypes.JSONB,
       allowNull: false,
+      defaultValue: {},
       comment: 'JSON mapping of answer options to multipliers',
     },
   }, {
     tableName: 'sustainability_questions',
     timestamps: true,
+    underscored: true,
   });
+
+  SustainabilityQuestion.associate = (models) => {
+    SustainabilityQuestion.belongsTo(models.Category, {
+      foreignKey: 'category_id',
+      as: 'category',
+    });
+  };
 
   return SustainabilityQuestion;
 };

@@ -1,17 +1,11 @@
-const { DataTypes } = require('sequelize');
-
-module.exports = (sequelize) => {
+module.exports = (sequelize, DataTypes) => {
   const Reward = sequelize.define('Reward', {
     id: {
-      type: DataTypes.UUID,
-      defaultValue: DataTypes.UUIDV4,
+      type: DataTypes.INTEGER,
       primaryKey: true,
+      autoIncrement: true,
     },
-    userId: {
-      type: DataTypes.UUID,
-      allowNull: false,
-    },
-    type: {
+    name: {
       type: DataTypes.STRING,
       allowNull: false,
     },
@@ -19,13 +13,14 @@ module.exports = (sequelize) => {
       type: DataTypes.INTEGER,
       allowNull: false,
     },
-    date: {
-      type: DataTypes.DATE,
+    description: {
+      type: DataTypes.STRING,
       allowNull: false,
-      defaultValue: DataTypes.NOW,
     },
-  }, {
-    timestamps: true,
+    image: {
+      type: DataTypes.STRING,
+      allowNull: false,
+    },
   });
 
   return Reward;

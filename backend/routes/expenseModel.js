@@ -1,9 +1,24 @@
 const express = require('express');
 const router = express.Router();
-const { Expense, Category } = require('../models');
+const { Expense, Category, User } = require('../models');
 const authMiddleware = require('../middleware/authMiddleware');
 
-function computeSustainabilityScore(cost, categoryName, details, baseFactor) {
+// Recomputes the user's total points by summing all of their expenses
+async function recalcUserPoints(userId) {
+  const userExpenses = await Expense.findAll({ where: { userId } });
+  const total = userExpenses.reduce((sum, e) => sum + Math.round(e.sustainabilityScore || 0), 0);
+
+  const user = await User.findByPk(userId);
+  if (!user) {
+    throw new Error(`User with ID ${userId} not found during point recalculation`);
+  }
+  user.points = total;
+  await user.save();
+  return user.points;
+}
+
+// The logic for computing the sustainability score
+function computeSustainabilityScore(cost, categoryName, details, baseFactor = 1) {
   let adjustedFactor = baseFactor;
   if (details && categoryName) {
     switch (categoryName) {
@@ -17,21 +32,19 @@ function computeSustainabilityScore(cost, categoryName, details, baseFactor) {
         if (details.sustainableBrand === true) adjustedFactor *= 0.80;
         break;
       case 'Food & Dining':
-        if (details.organic === true) adjustedFactor *= 0.8;
-        if (details.local === true) adjustedFactor *= 0.9;
+        if (details.organic === true) adjustedFactor *= 0.80;
+        if (details.local === true) adjustedFactor *= 0.90;
         break;
       case 'Health & Wellness':
-        if (details.naturalProducts === true) adjustedFactor *= 0.9;
+        if (details.naturalProducts === true) adjustedFactor *= 0.90;
         break;
       case 'Travel & Leisure':
-        if (details.mode) {
-          if (details.mode === 'public') {
-            adjustedFactor *= 0.7;
-          } else if (details.mode === 'carpool') {
-            adjustedFactor *= 0.8;
-          } else if (details.mode === 'electric') {
-            adjustedFactor *= 0.75;
-          }
+        if (details.mode === 'public') {
+          adjustedFactor *= 0.70;
+        } else if (details.mode === 'carpool') {
+          adjustedFactor *= 0.80;
+        } else if (details.mode === 'electric') {
+          adjustedFactor *= 0.75;
         }
         break;
       case 'Education & Self-Development':
@@ -40,13 +53,12 @@ function computeSustainabilityScore(cost, categoryName, details, baseFactor) {
       case 'Giving & Charity':
         if (details.greenCharity === true) adjustedFactor *= 0.90;
         break;
-      case 'Other':
       default:
-        // No additional adjustments.
         break;
     }
   }
-  return parseFloat((parseFloat(cost) * adjustedFactor).toFixed(2));
+  const score = parseFloat((parseFloat(cost) * adjustedFactor).toFixed(2));
+  return score;
 }
 
 // GET /expenses - Retrieve all expenses for the authenticated user
@@ -54,7 +66,14 @@ router.get('/', authMiddleware, async (req, res) => {
   try {
     const expenses = await Expense.findAll({
       where: { userId: req.user.id },
-      order: [['date', 'DESC']]
+      order: [['date', 'DESC']],
+      include: [
+        {
+          model: Category,
+          as: 'category',
+          attributes: ['name']
+        }
+      ]
     });
     console.log(`Fetched ${expenses.length} expenses for user ${req.user.id}`);
     res.json(expenses);
@@ -64,26 +83,31 @@ router.get('/', authMiddleware, async (req, res) => {
   }
 });
 
-// POST /expenses - Create a new expense
-// Expects a JSON body with date, name, cost, category (name), and optional details.
+// POST /expenses - Create a new expense, compute score, update user.points
 router.post('/', authMiddleware, async (req, res) => {
   try {
     const { date, name, cost, category, details } = req.body;
-    // Look up the category by name.
+    if (!date || !name || !cost || !category) {
+      return res.status(400).json({ error: 'Date, name, cost, and category are required.' });
+    }
+
+    const user = await User.findByPk(req.user.id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
     const foundCategory = await Category.findOne({ where: { name: category } });
     if (!foundCategory) {
       console.log(`Category "${category}" not found for user ${req.user.id}`);
       return res.status(400).json({ error: 'Category not found' });
     }
-    // Get the category's base sustainability factor.
+
     const sustainabilityFactor = await foundCategory.getSustainabilityFactor();
-    let baseFactor = sustainabilityFactor ? parseFloat(sustainabilityFactor.co2_factor) : 0;
-    // Compute the expense sustainability score.
+    const baseFactor = sustainabilityFactor ? parseFloat(sustainabilityFactor.co2_factor) : 1;
     const computedScore = computeSustainabilityScore(cost, category, details, baseFactor);
-    
-    // Create the expense record with the computed sustainability score.
-    const expense = await Expense.create({
-      userId: req.user.id,
+
+    const newExpense = await Expense.create({
+      userId: user.id,
       date,
       name,
       cost,
@@ -91,61 +115,92 @@ router.post('/', authMiddleware, async (req, res) => {
       details: details || {},
       sustainabilityScore: computedScore,
     });
-    console.log(`Created expense ${expense.id} for user ${req.user.id} in category ${category} with sustainabilityScore ${computedScore}`);
-    res.status(201).json(expense);
+
+    // Recompute user points from all expenses
+    await recalcUserPoints(user.id);
+
+    // Fetch the newly created expense, including category name
+    const createdExpense = await Expense.findByPk(newExpense.id, {
+      include: [{ model: Category, as: 'category', attributes: ['name'] }]
+    });
+
+    res.status(201).json(createdExpense);
   } catch (err) {
     console.error('Error creating expense:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// PUT /expenses/:id - Update an expense by its ID and re-compute its sustainability score
+// PUT /expenses/:id - Update expense, re-compute user points
 router.put('/:id', authMiddleware, async (req, res) => {
   try {
     const { date, name, cost, category, details } = req.body;
-    // Find the category by name.
+    const user = await User.findByPk(req.user.id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
     const foundCategory = await Category.findOne({ where: { name: category } });
     if (!foundCategory) {
-      console.log(`Category "${category}" not found for update by user ${req.user.id}`);
       return res.status(400).json({ error: 'Category not found' });
     }
-    // Get the associated sustainability factor.
+
     const sustainabilityFactor = await foundCategory.getSustainabilityFactor();
-    let baseFactor = sustainabilityFactor ? parseFloat(sustainabilityFactor.co2_factor) : 0;
+    const baseFactor = sustainabilityFactor ? parseFloat(sustainabilityFactor.co2_factor) : 1;
     const computedScore = computeSustainabilityScore(cost, category, details, baseFactor);
 
-    const updateData = { date, name, cost, category_id: foundCategory.id, sustainabilityScore: computedScore };
+    const updateData = {
+      date,
+      name,
+      cost,
+      category_id: foundCategory.id,
+      sustainabilityScore: computedScore
+    };
     if (details !== undefined) {
       updateData.details = details;
     }
-    const [updated] = await Expense.update(updateData, { where: { id: req.params.id, userId: req.user.id } });
-    if (updated) {
-      const updatedExpense = await Expense.findByPk(req.params.id);
-      console.log(`Updated expense ${req.params.id} for user ${req.user.id} with new sustainabilityScore ${computedScore}`);
-      res.json(updatedExpense);
-    } else {
-      console.log(`Expense ${req.params.id} not found for user ${req.user.id}`);
-      res.status(404).json({ error: 'Expense not found' });
+
+    const [updated] = await Expense.update(updateData, {
+      where: { id: req.params.id, userId: user.id }
+    });
+
+    if (!updated) {
+      return res.status(404).json({ error: 'Expense not found or not yours' });
     }
+
+    // Recompute user points from all expenses
+    await recalcUserPoints(user.id);
+
+    const updatedExpense = await Expense.findByPk(req.params.id, {
+      include: [{ model: Category, as: 'category', attributes: ['name'] }]
+    });
+
+    res.json(updatedExpense);
   } catch (err) {
     console.error('Error updating expense:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// DELETE /expenses/:id - Delete an expense by its ID
+// DELETE /expenses/:id - Delete expense, re-compute user points
 router.delete('/:id', authMiddleware, async (req, res) => {
   try {
-    const deleted = await Expense.destroy({
-      where: { id: req.params.id, userId: req.user.id }
-    });
-    if (deleted) {
-      console.log(`Deleted expense ${req.params.id} for user ${req.user.id}`);
-      res.json({ message: 'Expense deleted' });
-    } else {
-      console.log(`Expense ${req.params.id} not found for deletion for user ${req.user.id}`);
-      res.status(404).json({ error: 'Expense not found' });
+    const user = await User.findByPk(req.user.id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
     }
+
+    const deleted = await Expense.destroy({
+      where: { id: req.params.id, userId: user.id }
+    });
+    if (!deleted) {
+      return res.status(404).json({ error: 'Expense not found or not yours' });
+    }
+
+    // Recompute user points
+    await recalcUserPoints(user.id);
+
+    res.json({ message: 'Expense deleted' });
   } catch (err) {
     console.error('Error deleting expense:', err.message);
     res.status(500).json({ error: err.message });

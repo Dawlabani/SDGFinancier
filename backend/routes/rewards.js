@@ -1,47 +1,44 @@
 const express = require('express');
 const router = express.Router();
-const { Reward } = require('../models');
+const { Reward, User } = require('../models');
 const authMiddleware = require('../middleware/authMiddleware');
 
-// GET /rewards - Get all reward events for the authenticated user
+// Get rewards
 router.get('/', authMiddleware, async (req, res) => {
   try {
-    const rewards = await Reward.findAll({
-      where: { userId: req.user.id },
-      order: [['date', 'DESC']],
-    });
+    const rewards = await Reward.findAll();
     res.json(rewards);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ message: 'Error fetching rewards' });
   }
 });
 
-// GET /rewards/total - Get total reward points for the user
-router.get('/total', authMiddleware, async (req, res) => {
-  try {
-    const rewards = await Reward.findAll({
-      where: { userId: req.user.id },
-    });
-    const totalPoints = rewards.reduce((sum, reward) => sum + reward.points, 0);
-    res.json({ totalPoints });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+// Redeem reward
+router.post('/redeem', authMiddleware, async (req, res) => {
+  const { rewardId } = req.body;
 
-// POST /rewards - Create a new reward event
-router.post('/', authMiddleware, async (req, res) => {
   try {
-    const { type, points, date } = req.body;
-    const reward = await Reward.create({
-      userId: req.user.id,
-      type,
-      points,
-      date: date || new Date(),
-    });
-    res.status(201).json(reward);
+    const reward = await Reward.findByPk(rewardId);
+    const user = await User.findByPk(req.user.id);
+
+    if (!reward) {
+      return res.status(404).json({ success: false, message: 'Reward not found' });
+    }
+
+    if (user.points < reward.points) {
+      return res.status(400).json({ success: false, message: 'Not enough points' });
+    }
+
+    user.points -= reward.points;
+    await user.save();
+
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+
+    return res.json({ success: true, newPoints: user.points, code });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    return res.status(500).json({ success: false, message: 'Internal error redeeming reward' });
   }
 });
 
